@@ -1,0 +1,223 @@
+---
+title: "Netflix Analysis"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Explanatory Data Analysis and statistical test for Netflix data
+
+This is an explanatory analysis and statistical approach to Netflix data.
+Data are available [here](https://www.kaggle.com/datasets/victorsoeiro/netflix-tv-shows-and-movies?select=titles.csv)
+
+```{r library, include=F, warning=F, message=F}
+library(tidyverse)
+library(wordcloud2)
+library(countrycode)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(webshot)
+library(htmlwidgets)
+```
+
+We have two datasets which are connected with "id" key.
+```{r,warning=F, message=F}
+credit <- read.csv("../input/credits.csv")
+titles <- read.csv("../input/titles.csv")
+head(credit)
+head(titles)
+```
+
+```{r,warning=F, message=F}
+t1 <- credit %>% filter(role %in% c("ACTOR","DIRECTOR"))
+t2 <- titles %>% filter(type %in% c("SHOW","MOVIE"))
+
+table(t1$role)
+table(t2$type)
+```
+
+Credit data has information of their role (ACTOR or DIRECTOR).
+Titles data has title type (MOVIE or TVSHOW).
+
+### Explanatory Data Analysis
+
+Take a look at data worldwide.
+```{r warning=F, message=F}
+country_list <- str_extract_all(titles$production_countries,"[A-Z]+")
+n_country <- data.frame(id=titles$id,num_countries=map_dbl(country_list,~length(.)))
+country_names <- countrycode(unlist(country_list),origin = "genc2c", destination = "country.name")
+df_country <- data.frame(name=unlist(country_names)) %>% filter(is.na(name)==F) %>% 
+  group_by(name) %>% summarise(num_of_titles=n()) %>% arrange(desc(num_of_titles))
+head(df_country,10)
+```
+
+In terms of production country, united states is by far the most.
+Put it onto the map, it will be as below.
+
+```{r warning=F, message=F}
+world <- ne_countries(returnclass = "sf") %>% merge(df_country,ny="name")
+map <- ggplot(data = world) + geom_sf(aes(fill = num_of_titles)) + theme_classic() + 
+  coord_sf(datum = NA) + xlab("") + ylab("") + 
+  theme(panel.grid.major = element_line(color = grey(0.5), linetype = "dashed", 
+                                        size = 0.5), panel.background = element_rect(fill = "aliceblue"), legend.background = element_rect(fill="transparent")) +
+  scale_fill_gradient(low = "#f4f0f0", high = "red", na.value="white")
+map
+```
+
+Then, let's move on to credit data.
+
+```{r warning=F, message=F}
+stakeholders_used <- credit %>% group_by(id) %>% summarise(stakeholders=n_distinct(person_id))
+stakeholders_count <- credit %>% group_by(person_id,name) %>% summarise(count=n()) %>% arrange(desc(count))
+head(stakeholders_count,10)
+```
+
+Their name look indian?
+5th man Mr. Sakurai is a Japanese voice actor.
+
+Next, we are interested in which genre is popular among netflix titles.
+Dive into it with a wordcloud.
+
+```{r warning=F, message=F}
+genre_list <- str_extract_all(titles$genres,"[a-z]+")
+n_genre <- data.frame(id=titles$id,num_genres=map_dbl(genre_list,~length(.)))
+df_genre <- data.frame(genre=unlist(genre_list)) %>% 
+  group_by(genre) %>% summarise(count=n()) %>% arrange(desc(count))
+
+my_graph <- wordcloud2(df_genre, size = 2)
+saveWidget(my_graph, "tmp.html", selfcontained = F)
+webshot("tmp.html", "wc1.png", delay = 5, vwidth = 2000, vheight = 2000)
+```
+
+Drama and comedy are the most popular.
+It might be better for action, scifi to be watched in the theater with IMAX screens
+
+We have IMDB score as well.
+Is netflix reviewer critical? Are they likely to give good score?
+
+```{r warning=F, message=F}
+imdb_raw <- titles$imdb_score %>% as.numeric()
+par(mfcol=c(1,2))
+boxplot(imdb_raw)
+hist(imdb_raw)
+```
+
+IMDB score should be lower or equal to 10. Just treat overrated titles as outliers.
+
+```{r warning=F, message=F}
+par(mfcol=c(1,2))
+imdb_treat <- titles[as.numeric(titles$imdb_score)<=10,]$imdb_score %>% as.numeric()
+boxplot(imdb_treat)
+hist(imdb_treat)
+```
+
+```{r warning=F, message=F}
+summary(imdb_treat)
+```
+
+IMDB scores are fairly high with 6.7 points on average!
+Netflix contains popular and highly rated titles!
+
+### Statistical test
+
+Now we get that these movies have great score overall.
+But, can scores be different from some perspectives such as genre, production country.
+Let's check these questions.
+We are going to use Welch's t-test with 5% significance level.
+
+#### 1. United states vs Others
+
+Obviously, many titles are created in the US.
+Compare titles whose production countries includes US or not.
+
+```{r warning=F, message=F}
+us_title <- titles %>% mutate(imdb_score=as.numeric(imdb_score)) %>% 
+  filter(grepl(pattern = "US", x=production_countries) & imdb_score<=10) %>% mutate(area="US")
+non_us_title <- titles %>% mutate(imdb_score=as.numeric(imdb_score)) %>% 
+  filter(!grepl(pattern = "US", x=production_countries) & imdb_score<=10) %>% mutate(area="other")
+df <- rbind(us_title[,c("id","imdb_score","area")],non_us_title[,c("id","imdb_score","area")])
+
+g <- ggplot(df) + geom_histogram(aes(imdb_score,fill=area),alpha=.4,binwidth = .1)
+g
+```
+
+It seems that there is not significant difference in distribution.
+Execute t-test with null hypothesis; US production score is equal to other countries score. 
+
+```{r warning=F, message=F}
+res <- t.test(us_title$imdb_score,non_us_title$imdb_score)
+print(res)
+```
+
+Null hypothesis was not rejected. There is no significant difference.
+
+#### 2. Comedy vs Drama
+
+Comedy and drama could be seen as a popular genre in Netflix.
+Check IMDB score distributions of each genre.
+Here, we exclude titles which have both comedy and drama as its genre.
+
+```{r warning=F, message=F}
+titles_no_dup <- titles %>% mutate(imdb_score=as.numeric(imdb_score)) %>% 
+  filter(!grepl(pattern = "comedy", x=genres)|!grepl(pattern = "drama", x=genres)) %>% 
+  filter(imdb_score<=10)
+comedy <- filter(titles_no_dup, grepl(pattern = "comedy", x=genres)) %>% mutate(genre="comedy")
+drama <- filter(titles_no_dup, grepl(pattern = "drama", x=genres)) %>% mutate(genre="drama")
+df <- rbind(comedy[,c("id","imdb_score","genre")],drama[,c("id","imdb_score","genre")])
+
+g <- ggplot(df) + geom_histogram(aes(imdb_score,fill=genre),alpha=.4,binwidth = .1)
+g
+```
+
+Drama seems to be higher??
+Execute t-test with null hypothesis; comedy score is equal to drama score. 
+```{r warning=F, message=F}
+res <- t.test(comedy$imdb_score,drama$imdb_score)
+print(res)
+```
+Null hypothesis was rejected.p-value is less than 0.05 and there is significant difference between comedy and drama.
+Comedy titles seems to get higher score than drama.
+
+#### 3. Classic vs Modern
+
+We have not touched time series things. Let's check historical statistics of Netflix data.
+```{r warning=F, message=F}
+titles_year <- titles %>% filter(grepl("^\\d{4}$",titles$release_year)) %>%
+  mutate(release_year=as.Date(as.character(release_year), format = "%Y"))
+titles_year %>% group_by(release_year) %>% summarise(title_count=n()) %>%
+  ggplot(aes(release_year,title_count)) + geom_line() + geom_point()
+```
+
+The number of titles has been increasing considerably since around 2015.
+Let's say titles released before 2015 as "classic", others as "modern".
+Check thei IMDB score distributions.
+
+```{r warning=F, message=F}
+titles_year <- titles %>% mutate(imdb_score=as.numeric(imdb_score)) %>% 
+  filter(grepl("^\\d{4}$",titles$release_year)) %>%
+  mutate(release_year=as.Date(as.character(release_year), format = "%Y")) %>% 
+  filter(imdb_score<=10)
+classic <- filter(titles_year, release_year<="2015-12-31") %>% mutate(time="classic")
+modern <- filter(titles_year, release_year>="2016-01-01") %>% mutate(time="modern")
+df <- rbind(classic[,c("id","imdb_score","time")],modern[,c("id","imdb_score","time")])
+
+g <- ggplot(df) + geom_histogram(aes(imdb_score,fill=time),alpha=.4,binwidth = .1)
+g
+```
+
+Classic seems to be higher??
+Execute t-test with null hypothesis; classic score is equal to modern score. 
+```{r warning=F, message=F}
+res <- t.test(classic$imdb_score,modern$imdb_score)
+print(res)
+```
+
+Null hypothesis was rejected.P-value is less than 0.05 and there is significant difference between classic and modern.
+Classic titles seems to get higher score than modern.
+
+## Conclusion
+
+Although we got results that there are significant difference between drama and comedy, classic and modern. But these differences were just little.They are facts but we should keep an eye on other numbers such as confidential intervals, population sizes, their distribution itself and so on. Facts are just a tool for decision making.
+
