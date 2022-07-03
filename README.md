@@ -2,8 +2,6 @@
 
 EDA and data mining are used to deeply wrangle data. 
 
-================
-
 ## Explanatory Data Analysis and statistical test for Netflix data
 
 This is an explanatory analysis and statistical approach to Netflix
