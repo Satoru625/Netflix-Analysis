@@ -2,9 +2,9 @@
 
 EDA and data mining are used to deeply wrangle data. 
 
-## Explanatory Data Analysis and statistical test for Netflix data
+## Exploratory Data Analysis and statistical test for Netflix data
 
-This is an explanatory analysis and statistical approach to Netflix
+This is an exploratory analysis and statistical approach to Netflix
 data. Data are available
 [here](https://www.kaggle.com/datasets/victorsoeiro/netflix-tv-shows-and-movies?select=titles.csv)
 
@@ -85,7 +85,7 @@ table(t2$type)
 Credit data has information of their role (ACTOR or DIRECTOR). Titles
 data has title type (MOVIE or TVSHOW).
 
-### Explanatory Data Analysis
+### Exploratory Data Analysis
 
 Take a look at data worldwide.
 
